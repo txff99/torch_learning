@@ -7,6 +7,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from torch.utils.data import Dataset
+import numpy as np
 # from torch.optim import optim
 SAMPLE_RATE = 22050
 charset = ' abcdefghijklmnopqrstuvwxyz,.'
@@ -98,13 +99,39 @@ def get_dataloader(batch_size):
 def train():
     batch_size = 32
     dset, trainloader = get_dataloader(batch_size)
-    ctc_loss = nn.CTCLoss(reduction='mean').cuda()
+    ctc_loss = nn.CTCLoss(reduction='mean',zero_infinity= True).cuda()
     model = Rec().cuda()
-    optimizer = torch.optim.Adam(model.parameters(), lr = 0.01)
-    t = tqdm(trainloader, total = len(dset)//batch_size)
-    for data in t:
-        print(len(data))
-    # val = load_example('data/LJ037-0171.wav')
+    model.load_state_dict(torch.load("model/epoch_9.pt"))
+    optimizer = torch.optim.Adam(model.parameters(), lr = 0.001)
+    val = torch.tensor(load_example('sound/LJ037-0171.wav')).cuda()
+    for epoch in range(10):
+        mguess = model(val[None])
+        # print(mguess.size())
+        # print(mguess[0,:,:].argmax(dim=1).cpu())
+        pp = ''.join(charset[c-1] for c in mguess[0,:,:].argmax(dim=1).cpu() if c!=0)
+        print(pp)
+        torch.save(model.state_dict(),f"model/epoch_{epoch}.pt")
+        
+        
+        t = tqdm(trainloader, total = len(dset)//batch_size)
+        for data in t:
+            output, target, output_length, target_length = data
+            # print(output.size())
+            # print(target.size())
+            output = output.to('cuda:0', non_blocking = True)
+            target = target.to('cuda:0', non_blocking = True)
+            optimizer.zero_grad()
+            guess = model(output)
+            bb = ''.join(charset[c-1] for c in guess[:,0,:].argmax(dim=1).cpu() if c!=0)
+            if len(bb) >0:
+                print(bb)
+            loss = ctc_loss(guess, target, output_length, target_length)
+            loss.backward()
+            optimizer.step()
+            t.set_description("loss:%.2f" % loss.item())
+
+
+    # 
     
     # for epoch in range(100):
     #      t = tqdm(trainloader, total = len(dset)//batch_size)
